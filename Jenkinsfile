@@ -3,7 +3,8 @@
 
 def temporaryDockerRegistry = tempDockerRegistry
 def permanentDockerRegistry = permDockerRegistry
-
+def nexusRepoHostPort = nexusRepositoryHost
+def nexusRepo = nexusRepository
 
 // This update is for Bug ID : 531
 def httpProxy = ''
@@ -260,7 +261,13 @@ node {
   stage('Testing in Container Sandbox') {
     if(isTestPackageRequired){
           echo 'Testing the dockerfile before pushing to permanenet repository.'
-          
+          if (fileExists('test.sh')) {
+            echo 'Test.sh found'
+          }
+          else 
+          {
+            echo 'No test.sh'
+          }
           echo 'Working Directory for Docker Build file: ' + appWorkingDir
           echo "Build Tag Name: ${dockerRepo}/${dockerImageName}-build:${env.BUILD_NUMBER}"
           echo "Build params: --file ${testDockerFile} ${appWorkingDir}"
@@ -270,7 +277,7 @@ node {
           //Reading the CMD from Docker file and would be executing within the container. This is due to the behaviour of this plugin
           //TODO - Danger zone. This approach is not based on grammer. So in case if the CMD is not shell (if exec) or ENTRYPOINT is given, this approach would not work
           echo '${dockerImageName}-sandbox:${env.BUILD_NUMBER}'   
-          sh "docker run ${dockerRepo}/${dockerImageName}-sandbox:${env.BUILD_NUMBER} "
+          sh "docker run ${dockerRepo}/${dockerImageName}-sandbox:${env.BUILD_NUMBER}"
           //appCompileAndPackageImg.inside('--net=host') 
           //{        
             //sh dockerCMD.substring(dockerCMD.indexOf('CMD')+3, dockerCMD.length())
@@ -298,8 +305,8 @@ node {
     //slackSend "dGoss testing started for  ${dockerImageName}:${env.BUILD_NUMBER}. "
     echo 'The requested stage is dGoss testing with a YAML file. Hence testing the image pushed to permanent repo'
     echo "DGOSS TESTING TAG USED FOR IMAGE : ${env.BUILD_NUMBER}";
-    sh "cp /goss/goss.yaml ."
-    sh "dgoss run ${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}"
+    //sh "cp /goss/goss.yaml ."
+    sh "dgoss run ${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER} > dGossSanityReport.txt"
   } 
   //slackSend "dGoss unit testing complete."
   //---------------------------------------
@@ -327,4 +334,26 @@ node {
   }
  }
 }
+  stage('Publish Jenkins Output to Nexus'){
+    //TODO in code - Tune it later. Dirty solution to identify the Jenkins generated artifacts for Nexus. 
+    //TODO in Jenkins - Needs a Credential with the name "Nexus"
+    //TODO in Nexus web - Created a Hosted Site Repository with the name MEC
+    //TODO - Nexus3 support - Check the Sonatype plugin once released
+    //Nexus is a great component artifact repo. Does not look great dealing with binary documents and intermediate outputs.
+    //The plugin is too weak. It can upload only one file and hence Zipped
+    echo 'Publishing the artifacts...';
+    //def PWD = pwd(); //"${PWD}/artifacts.tar.gz"
+    //sh 'find . -type f -newer Nexus.txt -print0 | tar -czvf artifacts.tar.gz --ignore-failed-read --null -T -'
+    //Fixed for archive overlap issue
+    try{
+      sh 'find . -type f -newer Nexus.txt -print0 | tar -zcvf artifacts.tar.gz --ignore-failed-read --null -T -' 
+    } catch(Exception e) {
+    }
+      //Nexus 2
+    //nexusArtifactUploader artifacts: [[artifactId: "${env.JOB_NAME}", classifier: '', file: 'artifacts.tar.gz', type: 'gzip']], credentialsId: 'Nexus', groupId: 'org.jenkins-ci.main.mec', nexusUrl: '13.55.146.108:8085/nexus', nexusVersion: 'nexus2', protocol: 'http', repository: 'MEC',version: "${env.BUILD_NUMBER}"
+    //Nexus 3
+    nexusArtifactUploader artifacts: [[artifactId: "${env.JOB_NAME}", classifier: '', file: 'artifacts.tar.gz', type: 'gzip']], credentialsId: 'Nexus', groupId: 'org.jenkins-ci.main.mec', nexusUrl: nexusRepoHostPort, nexusVersion: 'nexus3', protocol: 'http', repository: nexusRepo,version: "${env.BUILD_NUMBER}"
+    sh 'rm Nexus.txt'    
+    //Dirty solution ends
+  }
 }
